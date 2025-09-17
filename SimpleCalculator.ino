@@ -15,6 +15,8 @@ void printToLcd(LiquidCrystal_I2C & lcd, char key, bool reset = false, bool isNe
       buffer[i] = 0;
     strStartIdx = 15;
     lcd.clear();
+    lcd.setCursor(15, 0);
+    lcd.print("0");
     return;
   }
 
@@ -187,16 +189,18 @@ int main() {
   LiquidCrystal_I2C lcd(0x27, LCD_COLS, LCD_ROWS);
   lcd.init();
   lcd.backlight();
+
+  lcd.setCursor(15, 0);
+  lcd.print("0");
   
   long int firstNumber, secondNumber;  
   char mainOperator;
-
+  
   bool resDisplayed = false;
+
   while (true)
   {
     collectNumberAndGetNextOperator(keypad, lcd, firstNumber, mainOperator, resDisplayed);
-    Serial.println(firstNumber);
-    Serial.println(mainOperator);
 
     if (mainOperator == 'C') {
       printToLcd(lcd, mainOperator, true);
@@ -207,16 +211,22 @@ int main() {
 
     char secondOp;
     collectNumberAndGetNextOperator(keypad, lcd, secondNumber, secondOp, resDisplayed);
-    Serial.println(secondNumber);
-    Serial.println(secondOp);
-    Serial.println(doCalculation(firstNumber, secondNumber, mainOperator));
 
     if (secondOp == 'C') {
       printToLcd(lcd, secondOp, true);
       continue;
     }
     else if (secondOp == '=') {
-      printNumberToLcd(lcd, doCalculation(firstNumber, secondNumber, mainOperator));
+      long int res = doCalculation(firstNumber, secondNumber, mainOperator);
+      if (res != -1) {
+        printNumberToLcd(lcd, doCalculation(firstNumber, secondNumber, mainOperator));
+      }
+      else {
+        lcd.setCursor(0, 1);
+        lcd.print("Result:");
+        lcd.setCursor(13, 1);
+        lcd.print("NaN");
+      }
       resDisplayed = true;
     }
   }
