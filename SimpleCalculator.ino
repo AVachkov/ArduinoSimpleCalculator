@@ -5,169 +5,201 @@
 #define LCD_ROWS 2
 #define LCD_COLS 16
 
-void printToLcd(LiquidCrystal_I2C & lcd, char key, bool reset = false, bool isNegative = false)
+// handles key press/release
+// returns the key
+char waitForKey(Keypad & keypad) 
 {
-  static char buffer[17] = {0}; // leave space for null terminator
-  static uint8_t strStartIdx = 15;
+  char key = NO_KEY;
 
-  if (reset) {
-    for (uint8_t i = 0; i < LCD_COLS; i++)
-      buffer[i] = 0;
-    strStartIdx = 15;
-    lcd.clear();
-    lcd.setCursor(15, 0);
+  // wait for key press
+  while (key == NO_KEY)
+    key = keypad.getKey();
+
+  // wait for the key to be released
+  char tempKey = key;
+  while (tempKey != NO_KEY)
+    tempKey = keypad.getKey();
+  
+  return key;
+}
+
+// Quick helper to check if a key is one of + - * /
+bool isOperator(char ch)
+{
+  return ch == '+' || ch == '-' || ch == '*' || ch == '/';
+}
+
+void printInitialState(LiquidCrystal_I2C & lcd)
+{
+  lcd.clear();
+  lcd.setCursor(15, 0);
+  lcd.print("0");
+}
+
+void clearRow(LiquidCrystal_I2C & lcd, uint8_t row) {
+    lcd.setCursor(0, row);
+    lcd.print("                ");
+}
+
+void showInput(LiquidCrystal_I2C & lcd, const char * text)
+{
+  uint8_t strLen = 0;
+  while (text[strLen] != 0)
+    strLen++;
+
+  // clear leftover
+  clearRow(lcd, 0);
+
+  if (strLen == 0) {
+    lcd.setCursor(LCD_COLS - 1, 0);
     lcd.print("0");
     return;
   }
 
-  // shift left once
-  for (uint8_t i = 1; i <= LCD_COLS - 1; i++)
-    buffer[i - 1] = buffer[i];
-
-  buffer[LCD_COLS - 1] = key;
-
-  // gather str to print
-  char str[17];
-  uint8_t strLen = 0;
-
-  for (uint8_t i = strStartIdx; i < LCD_COLS; i++) {
-    str[strLen] = buffer[i];
-    strLen++;
-  }
-
-  str[strLen] = 0; // string ends here
+  // limit to LCD width
+  if (strLen > LCD_COLS)
+    strLen = LCD_COLS;
 
   lcd.setCursor(LCD_COLS - strLen, 0);
-  lcd.print(str);
-
-  if (strStartIdx > 0)
-      strStartIdx--;
+  lcd.print(text);
 }
 
-void collectNumberAndGetNextOperator(Keypad & keypad, LiquidCrystal_I2C & lcd, long int & numberOut, char & operatorOut, bool & resDisplayed)
+// show result for integer values
+void showResult(LiquidCrystal_I2C & lcd, long int result)
 {
-  bool isNegative = false;
-  bool numberStarted = false;
-  bool negativeSignPressed = false;
-  char key;
-  numberOut = 0;
-
-  // collecting first number
-  while (true)
-  {
-    key = NO_KEY;
-
-    // wait for key press
-    while (key == NO_KEY)
-      key = keypad.getKey();
-
-    if (resDisplayed && key >= '0' && key <= '9') {
-      printToLcd(lcd, 0, true);
-      resDisplayed = false;
-    }
-
-    // wait for the key to be released
-    char tempKey = key;
-    while (tempKey != NO_KEY)
-      tempKey = keypad.getKey();
-
-    if (key >= '0' && key <= '9') {
-      if (!numberStarted)
-        numberStarted = true;
-
-      uint8_t digit = key - '0';
-      numberOut = (numberOut * 10) + digit;
-      printToLcd(lcd, key);
-    }
-    else if (key == '+' || key == '-' || key == '*' || key == '/') {
-      if (!numberStarted) {
-        if (key == '-' && !negativeSignPressed) {
-          isNegative = true;
-          negativeSignPressed = true;
-          printToLcd(lcd, key);
-        }
-      }
-      else {
-        printToLcd(lcd, key);
-        break;
-      }
-    }
-    else if (key == '=') {
-      break;
-    }
-    else if (key == 'C') {
-      numberOut = 0;
-      break;
-    }
-  }
-
-  if (isNegative)
-    numberOut = -numberOut;
-
-  operatorOut = key;
-}
-
-long int doCalculation(const long int first, const long int second, const char op) {
-  switch (op) {
-    case '+': return first + second;
-    case '-': return first - second;
-    case '*': return first * second;
-    case '/':
-      if (second != 0) return first / second;
-      else return -1;
-  }
-  return 0;
-}
-
-void printNumberToLcd(LiquidCrystal_I2C & lcd, long int number)
-{
-  // the number as string
   char str[17];
-
-  // number length without the '-'
+  bool isNegative = false;
   uint8_t len = 0;
 
-  if (number == 0) {
-    lcd.setCursor(0, 1);
-    lcd.print("Result:");
-    lcd.setCursor((LCD_COLS - 1) - len, 1);
-    lcd.print("0");
-    return;
-  }
-
   // check if the number is negative
-  int8_t stringBoundary = 0;
-  if (number < 0) {
-    str[0] = '-';
-    stringBoundary = 1;
-    number *= -1;
+  if (result < 0) {
+    isNegative = true;
+    result = -result;
   }
 
-  // count the number length
-  {
-    long int copy = number;
-    while (copy > 0) {
+  long int copy = result;
+  if (copy == 0) {
+    str[len++] = '0';
+  }
+  else {
+    while (copy > 0 && len < 16) {
+      str[len++] = '0' + (copy % 10);
       copy /= 10;
-      len++;
+    }
+    
+    // reverse the string
+    for (int8_t i = 0; i < len / 2; i++) {
+      char temp = str[i];
+      str[i] = str[(len - 1) - i];
+      str[(len - 1) - i] = temp;
     }
   }
 
-  // enter the number inside the buffer
-  int8_t idx = (len - 1) + stringBoundary;
-  while (idx >= stringBoundary) {
-    str[idx] = '0' + (number % 10);
-    number /= 10;
-    idx--;
+  // shift once to front
+  // leave space for '-'
+  if (isNegative && len < 16) {
+    for (int i = len; i >= 1; i--)
+      str[i] = str[i - 1];
+
+    str[0] = '-';
+    len++;
   }
-  str[len + stringBoundary] = 0; // end the string
+  
+  str[len] = 0; // end string
+
+  // clear result leftover
+  clearRow(lcd, 1);
 
   lcd.setCursor(0, 1);
   lcd.print("Result:");
-  lcd.setCursor(LCD_COLS - (len + stringBoundary), 1);
+  lcd.setCursor(LCD_COLS - len, 1);
   lcd.print(str);
 }
 
-int main() {
+// show result for float values
+void showResult(LiquidCrystal_I2C & lcd, float result)
+{
+  char str[17];
+  dtostrf(result, 0, 2, str); // convert float to string with 2 decimal places
+
+  // clear previous result
+  clearRow(lcd, 1);
+
+  lcd.setCursor(0, 1);
+  lcd.print("Result:");
+  lcd.setCursor(LCD_COLS - strlen(str), 1);
+  lcd.print(str);
+}
+
+// reads a number until an operator is inserted
+// passes the result number by reference
+// returns the operator
+// handles negatives
+// prints to lcd consistently
+char readNumber(Keypad & keypad, LiquidCrystal_I2C & lcd, long int & numberOut)
+{
+  char buffer[17] = {0};
+  uint8_t len = 0;
+  
+  while (true)
+  {
+    char key = waitForKey(keypad);
+
+    if (key >= '0' && key <= '9') {
+      if (len < 16) {
+        buffer[len++] = key;
+        buffer[len] = 0; // end the string
+        showInput(lcd, buffer);
+      }
+    }
+    else if (key == '-' && len == 0) {
+      buffer[len++] = key;
+      buffer[len] = 0; // end the string
+      showInput(lcd, buffer);
+    }
+    else if (isOperator(key) || key == '=' || key == 'C') {
+      numberOut = atol(buffer); // ascii to long int
+      
+      if (isOperator(key)) {
+        char opStr[2] = {key, 0};
+        showInput(lcd, opStr);
+      }
+
+      return key;
+    }
+  }
+}
+
+// Does the math, sets result
+// Returns false on error (like divide-by-zero)
+bool calculate(long int a, long int b, char op, long int & result)
+{
+  switch (op) {
+    case '+': result = a + b; return true;
+    case '-': result = a - b; return true;
+    case '*': result = a * b; return true;
+    case '/':
+      if (b != 0) {
+        result = a / b; // integer division
+        return true;
+      }
+      else
+        return false;
+  }
+  return false; // unknown operator
+}
+
+// Calculates division only
+// sets result as floating point
+bool calculate(long int a, long int b, float & result)
+{
+  if (b == 0) return false;
+  result = 1.0 * a / b;
+  return true;
+}
+
+int main()
+{
   init();
   Serial.begin(9600);
 
@@ -190,44 +222,42 @@ int main() {
   lcd.init();
   lcd.backlight();
 
-  lcd.setCursor(15, 0);
-  lcd.print("0");
-  
-  long int firstNumber, secondNumber;  
-  char mainOperator;
-  
-  bool resDisplayed = false;
+  printInitialState(lcd);
 
+  long int a, b;
+  char mainOp, secondaryOp;
   while (true)
   {
-    collectNumberAndGetNextOperator(keypad, lcd, firstNumber, mainOperator, resDisplayed);
+    mainOp = readNumber(keypad, lcd, a);
 
-    if (mainOperator == 'C') {
-      printToLcd(lcd, mainOperator, true);
-      continue;
-    }
-    else if (mainOperator == '=')
-      continue;
-
-    char secondOp;
-    collectNumberAndGetNextOperator(keypad, lcd, secondNumber, secondOp, resDisplayed);
-
-    if (secondOp == 'C') {
-      printToLcd(lcd, secondOp, true);
-      continue;
-    }
-    else if (secondOp == '=') {
-      long int res = doCalculation(firstNumber, secondNumber, mainOperator);
-      if (res != -1) {
-        printNumberToLcd(lcd, doCalculation(firstNumber, secondNumber, mainOperator));
+    if (!isOperator(mainOp)) {
+      if (mainOp == '=' || mainOp == 'C') {
+        printInitialState(lcd);
+        continue;
       }
-      else {
-        lcd.setCursor(0, 1);
-        lcd.print("Result:");
-        lcd.setCursor(13, 1);
-        lcd.print("NaN");
+    }
+    
+    secondaryOp = readNumber(keypad, lcd, b);
+
+    if (isOperator(secondaryOp) || secondaryOp == '=') {
+      long int result;
+      float floatResult;
+      bool isCorrect;
+      if (mainOp != '/')
+        isCorrect = calculate(a, b, mainOp, result);
+      else
+        isCorrect = calculate(a, b, floatResult);
+
+      if (isCorrect) {
+        if (mainOp == '/')
+          showResult(lcd, floatResult);
+        else
+          showResult(lcd, result);
       }
-      resDisplayed = true;
+    }
+    else if (secondaryOp == 'C') {
+      printInitialState(lcd);
+      continue;
     }
   }
 
